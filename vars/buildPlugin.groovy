@@ -208,7 +208,7 @@ def call(Map params = [:]) {
                     sourceCodeEncoding: 'UTF-8',
                     skipBlames: true,
                     trendChartType: 'TOOLS_ONLY',
-                    qualityGates: [[threshold: 1, type: 'NEW', unstable: true]]]
+                    qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]]
                   if (params?.spotbugs) {
                     spotbugsArguments.putAll(params.spotbugs as Map)
                   }
