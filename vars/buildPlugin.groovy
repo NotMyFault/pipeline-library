@@ -108,207 +108,209 @@ def call(Map params = [:]) {
               String m2repo
 
               stage("Build (${stageIdentifier})") {
-                String command
-                if (isMaven) {
-                  m2repo = "${pwd tmp: true}/m2repo"
-                  List<String> mavenOptions = [
-                    '--update-snapshots',
-                    "-Dmaven.repo.local=$m2repo",
-                    '-Dmaven.test.failure.ignore',
-                    '-Dspotbugs.failOnError=false',
-                    '-Dcheckstyle.failOnViolation=false',
-                    '-Dcheckstyle.failsOnError=false',
-                  ]
-                  // jacoco had file locking issues on Windows, so only running on linux
-                  if (isUnix()) {
-                    mavenOptions += '-Penable-jacoco'
-                  }
-                  if (incrementals) {
-                    // set changelist and activate produce-incrementals profile
-                    mavenOptions += '-Dset.changelist'
-                    if (doArchiveArtifacts) {
-                      // ask Maven for the value of -rc999.abc123def456
-                      changelistF = "${pwd tmp: true}/changelist"
-                      mavenOptions += "help:evaluate -Dexpression=changelist -Doutput=$changelistF"
+                ansiColor('xterm') {
+                  String command
+                  if (isMaven) {
+                    m2repo = "${pwd tmp: true}/m2repo"
+                    List<String> mavenOptions = [
+                      '--update-snapshots',
+                      "-Dmaven.repo.local=$m2repo",
+                      '-Dmaven.test.failure.ignore',
+                      '-Dspotbugs.failOnError=false',
+                      '-Dcheckstyle.failOnViolation=false',
+                      '-Dcheckstyle.failsOnError=false',
+                    ]
+                    // jacoco had file locking issues on Windows, so only running on linux
+                    if (isUnix()) {
+                      mavenOptions += '-Penable-jacoco'
                     }
-                  }
-                  if (jenkinsVersion) {
-                    mavenOptions += "-Djenkins.version=${jenkinsVersion} -Daccess-modifier-checker.failOnError=false"
-                  }
-                  if (skipTests) {
-                    mavenOptions += '-DskipTests'
-                  }
-                  mavenOptions += 'clean install'
-                  def pit = params?.pit as Map ?: [:]
-                  def runWithPit = pit.containsKey('skip') && !pit['skip'] // use same convention as in tests.skip
-                  if (runWithPit && first) {
-                    mavenOptions += '-Ppit'
-                  }
-                  try {
-                    infra.runMaven(mavenOptions, jdk, null, addToolEnv, useArtifactCachingProxy)
-                  } finally {
-                    if (!skipTests) {
-                      junit('**/target/surefire-reports/**/*.xml,**/target/failsafe-reports/**/*.xml,**/target/invoker-reports/**/*.xml')
-                      if (first) {
-                        discoverReferenceBuild()
-                        // Default configuration for JaCoCo can be overwritten using a `jacoco` parameter (map).
-                        // Configuration see: https://www.jenkins.io/doc/pipeline/steps/code-coverage-api/#recordcoverage-record-code-coverage-results
-                        Map jacocoArguments = [tools: [[parser: 'JACOCO', pattern: '**/jacoco/jacoco.xml']], sourceCodeRetention: 'MODIFIED']
-                        if (params?.jacoco) {
-                          jacocoArguments.putAll(params.jacoco as Map)
-                        }
-                        recordCoverage jacocoArguments
-                        if (pit) {
-                          Map pitArguments = [tools: [[parser: 'PIT', pattern: '**/pit-reports/mutations.xml']], id: 'pit', name: 'Mutation Coverage', sourceCodeRetention: 'MODIFIED']
-                          pitArguments.putAll(pit)
-                          pitArguments.remove('skip')
-                          recordCoverage(pitArguments)
+                    if (incrementals) {
+                      // set changelist and activate produce-incrementals profile
+                      mavenOptions += '-Dset.changelist'
+                      if (doArchiveArtifacts) {
+                        // ask Maven for the value of -rc999.abc123def456
+                        changelistF = "${pwd tmp: true}/changelist"
+                        mavenOptions += "help:evaluate -Dexpression=changelist -Doutput=$changelistF"
+                      }
+                    }
+                    if (jenkinsVersion) {
+                      mavenOptions += "-Djenkins.version=${jenkinsVersion} -Daccess-modifier-checker.failOnError=false"
+                    }
+                    if (skipTests) {
+                      mavenOptions += '-DskipTests'
+                    }
+                    mavenOptions += 'clean install'
+                    def pit = params?.pit as Map ?: [:]
+                    def runWithPit = pit.containsKey('skip') && !pit['skip'] // use same convention as in tests.skip
+                    if (runWithPit && first) {
+                      mavenOptions += '-Ppit'
+                    }
+                    try {
+                      infra.runMaven(mavenOptions, jdk, null, addToolEnv, useArtifactCachingProxy)
+                    } finally {
+                      if (!skipTests) {
+                        junit('**/target/surefire-reports/**/*.xml,**/target/failsafe-reports/**/*.xml,**/target/invoker-reports/**/*.xml')
+                        if (first) {
+                          discoverReferenceBuild()
+                          // Default configuration for JaCoCo can be overwritten using a `jacoco` parameter (map).
+                          // Configuration see: https://www.jenkins.io/doc/pipeline/steps/code-coverage-api/#recordcoverage-record-code-coverage-results
+                          Map jacocoArguments = [tools: [[parser: 'JACOCO', pattern: '**/jacoco/jacoco.xml']], sourceCodeRetention: 'MODIFIED']
+                          if (params?.jacoco) {
+                            jacocoArguments.putAll(params.jacoco as Map)
+                          }
+                          recordCoverage jacocoArguments
+                          if (pit) {
+                            Map pitArguments = [tools: [[parser: 'PIT', pattern: '**/pit-reports/mutations.xml']], id: 'pit', name: 'Mutation Coverage', sourceCodeRetention: 'MODIFIED']
+                            pitArguments.putAll(pit)
+                            pitArguments.remove('skip')
+                            recordCoverage(pitArguments)
+                          }
                         }
                       }
                     }
-                  }
-                } else {
-                  infra.publishDeprecationCheck('Replace buildPlugin with buildPluginWithGradle', 'Gradle mode for buildPlugin() is deprecated, please use buildPluginWithGradle()')
-                  List<String> gradleOptions = [
-                    '--no-daemon',
-                    'cleanTest',
-                    'build',
-                  ]
-                  if (skipTests) {
-                    gradleOptions += '--exclude-task test'
-                  }
-                  command = "gradlew ${gradleOptions.join(' ')}"
-                  if (isUnix()) {
-                    command = './' + command
-                  }
-
-                  try {
-                    infra.runWithJava(command, jdk, null, addToolEnv)
-                  } finally {
-                    if (!skipTests) {
-                      junit('**/build/test-results/**/*.xml')
-                    }
-                  }
-                }
-              }
-
-              stage("Archive (${stageIdentifier})") {
-                if (failFast && currentBuild.result == 'UNSTABLE') {
-                  error 'There were test failures; halting early'
-                }
-
-                if (first) {
-                  if (skipTests) {
-                    // otherwise the reference build has been computed already
-                    discoverReferenceBuild()
-                  }
-                  echo "Recording static analysis results on '${stageIdentifier}'"
-
-                  recordIssues(
-                      enabledForFailure: true,
-                      tool: mavenConsole(),
-                      skipBlames: true,
-                      trendChartType: 'TOOLS_ONLY'
-                      )
-                  recordIssues(
-                      enabledForFailure: true,
-                      tools: [java(), javaDoc()],
-                      filters: [excludeFile('.*Assert.java')],
-                      sourceCodeEncoding: 'UTF-8',
-                      skipBlames: true,
-                      trendChartType: 'TOOLS_ONLY'
-                      )
-
-                  // Default configuration for SpotBugs can be overwritten using a `spotbugs`, `checkstyle', etc. parameter (map).
-                  // Configuration see: https://github.com/jenkinsci/warnings-ng-plugin/blob/master/doc/Documentation.md#configuration
-                  Map spotbugsArguments = [tool: spotBugs(pattern: '**/target/spotbugsXml.xml,**/target/findbugsXml.xml'),
-                    sourceCodeEncoding: 'UTF-8',
-                    skipBlames: true,
-                    trendChartType: 'TOOLS_ONLY',
-                    qualityGates: [[threshold: 1, type: 'NEW', unstable: true]]]
-                  if (params?.spotbugs) {
-                    spotbugsArguments.putAll(params.spotbugs as Map)
-                  }
-                  recordIssues spotbugsArguments
-
-                  Map checkstyleArguments = [tool: checkStyle(pattern: '**/target/checkstyle-result.xml'),
-                    sourceCodeEncoding: 'UTF-8',
-                    skipBlames: true,
-                    trendChartType: 'TOOLS_ONLY',
-                    qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]]
-                  if (params?.checkstyle) {
-                    checkstyleArguments.putAll(params.checkstyle as Map)
-                  }
-                  recordIssues checkstyleArguments
-
-                  Map pmdArguments = [tool: pmdParser(pattern: '**/target/pmd.xml'),
-                    sourceCodeEncoding: 'UTF-8',
-                    skipBlames: true,
-                    trendChartType: 'NONE']
-                  if (params?.pmd) {
-                    pmdArguments.putAll(params.pmd as Map)
-                  }
-                  recordIssues pmdArguments
-
-                  Map cpdArguments = [tool: cpd(pattern: '**/target/cpd.xml'),
-                    sourceCodeEncoding: 'UTF-8',
-                    skipBlames: true,
-                    trendChartType: 'NONE']
-                  if (params?.cpd) {
-                    cpdArguments.putAll(params.cpd as Map)
-                  }
-                  recordIssues cpdArguments
-
-                  recordIssues(
-                      enabledForFailure: true, tool: taskScanner(
-                      includePattern:'**/*.java',
-                      excludePattern:'**/target/**',
-                      highTags:'FIXME',
-                      normalTags:'TODO'),
-                      sourceCodeEncoding: 'UTF-8',
-                      skipBlames: true,
-                      trendChartType: 'NONE'
-                      )
-                  if (failFast && currentBuild.result == 'UNSTABLE') {
-                    error 'Static analysis quality gates not passed; halting early'
-                  }
-                  /*
-                   * If the current build was successful, we send the commits to Launchable so that
-                   * the result can be consumed by a Launchable build in the future. We do not
-                   * attempt to record commits for non-incrementalified plugins because such
-                   * plugins' PR builds could not be consumed by anything else anyway, and all
-                   * plugins currently in the BOM are incrementalified.
-                   */
-                  if (incrementals && currentBuild.currentResult == 'SUCCESS' && useContainerAgent) {
-                    withCredentials([string(credentialsId: 'launchable-jenkins-bom', variable: 'LAUNCHABLE_TOKEN')]) {
-                      if (isUnix()) {
-                        sh 'launchable verify && launchable record commit'
-                      } else {
-                        bat 'launchable verify && launchable record commit'
-                      }
-                    }
-                  }
-                } else {
-                  echo "Skipping static analysis results for ${stageIdentifier}"
-                }
-                if (doArchiveArtifacts) {
-                  if (incrementals) {
-                    String changelist = readFile(changelistF)
-                    dir(m2repo) {
-                      fingerprint '**/*-rc*.*/*-rc*.*' // includes any incrementals consumed
-                      archiveArtifacts artifacts: "**/*$changelist/*$changelist*",
-                      excludes: '**/*.lastUpdated',
-                      allowEmptyArchive: true // in case we forgot to reincrementalify
-                    }
-                    publishingIncrementals = true
                   } else {
-                    String artifacts
-                    if (isMaven) {
-                      artifacts = '**/target/*.hpi,**/target/*.jpi,**/target/*.jar'
-                    } else {
-                      artifacts = '**/build/libs/*.hpi,**/build/libs/*.jpi'
+                    infra.publishDeprecationCheck('Replace buildPlugin with buildPluginWithGradle', 'Gradle mode for buildPlugin() is deprecated, please use buildPluginWithGradle()')
+                    List<String> gradleOptions = [
+                      '--no-daemon',
+                      'cleanTest',
+                      'build',
+                    ]
+                    if (skipTests) {
+                      gradleOptions += '--exclude-task test'
                     }
-                    archiveArtifacts artifacts: artifacts, fingerprint: true
+                    command = "gradlew ${gradleOptions.join(' ')}"
+                    if (isUnix()) {
+                      command = './' + command
+                    }
+
+                    try {
+                      infra.runWithJava(command, jdk, null, addToolEnv)
+                    } finally {
+                      if (!skipTests) {
+                        junit('**/build/test-results/**/*.xml')
+                      }
+                    }
+                  }
+                }
+
+                stage("Archive (${stageIdentifier})") {
+                  if (failFast && currentBuild.result == 'UNSTABLE') {
+                    error 'There were test failures; halting early'
+                  }
+
+                  if (first) {
+                    if (skipTests) {
+                      // otherwise the reference build has been computed already
+                      discoverReferenceBuild()
+                    }
+                    echo "Recording static analysis results on '${stageIdentifier}'"
+
+                    recordIssues(
+                        enabledForFailure: true,
+                        tool: mavenConsole(),
+                        skipBlames: true,
+                        trendChartType: 'TOOLS_ONLY'
+                        )
+                    recordIssues(
+                        enabledForFailure: true,
+                        tools: [java(), javaDoc()],
+                        filters: [excludeFile('.*Assert.java')],
+                        sourceCodeEncoding: 'UTF-8',
+                        skipBlames: true,
+                        trendChartType: 'TOOLS_ONLY'
+                        )
+
+                    // Default configuration for SpotBugs can be overwritten using a `spotbugs`, `checkstyle', etc. parameter (map).
+                    // Configuration see: https://github.com/jenkinsci/warnings-ng-plugin/blob/master/doc/Documentation.md#configuration
+                    Map spotbugsArguments = [tool: spotBugs(pattern: '**/target/spotbugsXml.xml,**/target/findbugsXml.xml'),
+                      sourceCodeEncoding: 'UTF-8',
+                      skipBlames: true,
+                      trendChartType: 'TOOLS_ONLY',
+                      qualityGates: [[threshold: 1, type: 'NEW', unstable: true]]]
+                    if (params?.spotbugs) {
+                      spotbugsArguments.putAll(params.spotbugs as Map)
+                    }
+                    recordIssues spotbugsArguments
+
+                    Map checkstyleArguments = [tool: checkStyle(pattern: '**/target/checkstyle-result.xml'),
+                      sourceCodeEncoding: 'UTF-8',
+                      skipBlames: true,
+                      trendChartType: 'TOOLS_ONLY',
+                      qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]]
+                    if (params?.checkstyle) {
+                      checkstyleArguments.putAll(params.checkstyle as Map)
+                    }
+                    recordIssues checkstyleArguments
+
+                    Map pmdArguments = [tool: pmdParser(pattern: '**/target/pmd.xml'),
+                      sourceCodeEncoding: 'UTF-8',
+                      skipBlames: true,
+                      trendChartType: 'NONE']
+                    if (params?.pmd) {
+                      pmdArguments.putAll(params.pmd as Map)
+                    }
+                    recordIssues pmdArguments
+
+                    Map cpdArguments = [tool: cpd(pattern: '**/target/cpd.xml'),
+                      sourceCodeEncoding: 'UTF-8',
+                      skipBlames: true,
+                      trendChartType: 'NONE']
+                    if (params?.cpd) {
+                      cpdArguments.putAll(params.cpd as Map)
+                    }
+                    recordIssues cpdArguments
+
+                    recordIssues(
+                        enabledForFailure: true, tool: taskScanner(
+                        includePattern:'**/*.java',
+                        excludePattern:'**/target/**',
+                        highTags:'FIXME',
+                        normalTags:'TODO'),
+                        sourceCodeEncoding: 'UTF-8',
+                        skipBlames: true,
+                        trendChartType: 'NONE'
+                        )
+                    if (failFast && currentBuild.result == 'UNSTABLE') {
+                      error 'Static analysis quality gates not passed; halting early'
+                    }
+                    /*
+                    * If the current build was successful, we send the commits to Launchable so that
+                    * the result can be consumed by a Launchable build in the future. We do not
+                    * attempt to record commits for non-incrementalified plugins because such
+                    * plugins' PR builds could not be consumed by anything else anyway, and all
+                    * plugins currently in the BOM are incrementalified.
+                    */
+                    if (incrementals && currentBuild.currentResult == 'SUCCESS' && useContainerAgent) {
+                      withCredentials([string(credentialsId: 'launchable-jenkins-bom', variable: 'LAUNCHABLE_TOKEN')]) {
+                        if (isUnix()) {
+                          sh 'launchable verify && launchable record commit'
+                        } else {
+                          bat 'launchable verify && launchable record commit'
+                        }
+                      }
+                    }
+                  } else {
+                    echo "Skipping static analysis results for ${stageIdentifier}"
+                  }
+                  if (doArchiveArtifacts) {
+                    if (incrementals) {
+                      String changelist = readFile(changelistF)
+                      dir(m2repo) {
+                        fingerprint '**/*-rc*.*/*-rc*.*' // includes any incrementals consumed
+                        archiveArtifacts artifacts: "**/*$changelist/*$changelist*",
+                        excludes: '**/*.lastUpdated',
+                        allowEmptyArchive: true // in case we forgot to reincrementalify
+                      }
+                      publishingIncrementals = true
+                    } else {
+                      String artifacts
+                      if (isMaven) {
+                        artifacts = '**/target/*.hpi,**/target/*.jpi,**/target/*.jar'
+                      } else {
+                        artifacts = '**/build/libs/*.hpi,**/build/libs/*.jpi'
+                      }
+                      archiveArtifacts artifacts: artifacts, fingerprint: true
+                    }
                   }
                 }
               }
